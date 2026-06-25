@@ -1,5 +1,6 @@
 import type {
   ActiveDesc,
+  CameraInfo,
   ClassDef,
   ConfigSummary,
   ImportMode,
@@ -116,5 +117,10 @@ export const neuralApi = {
   // ── Поиск конфигурации по камере ───────────────────────────
   findCameraConfig(cameraId: string): Promise<{ camera_id: string; config_id: string | null; found: boolean }> {
     return fetch(url(`/neural/camera?camera_id=${encodeURIComponent(cameraId)}`)).then(unwrap);
+  },
+
+  // ── Список камер (GET /camera, controller.cpp) ─────────────
+  listCameras(): Promise<{ cameras: Record<string, CameraInfo> | null }> {
+    return fetch(url('/api/camera')).then(unwrap<{ cameras: Record<string, CameraInfo> | null }>);
   },
 };

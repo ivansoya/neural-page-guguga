@@ -66,3 +66,10 @@ export type ImportMode = 'merge' | 'replace';
 /** Ядра NPU — сервер допускает индексы 0..2 (validate_no_core_conflicts) */
 export const NPU_CORES = [0, 1, 2] as const;
 export type CoreId = (typeof NPU_CORES)[number];
+
+/** Камера из GET /camera (controller.cpp) */
+export interface CameraInfo {
+  display_name?: string;
+  type?: number;
+  description?: string;
+}
