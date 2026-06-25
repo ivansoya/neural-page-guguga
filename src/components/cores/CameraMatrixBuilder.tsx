@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { CameraMatrix } from '../../api/types';
 
 interface CamOption {
@@ -9,25 +10,19 @@ interface CamOption {
 interface Props {
   matrix: CameraMatrix;
   cameras: CamOption[];
+  editable: boolean;
   onChange: (m: CameraMatrix) => void;
 }
 
-export function CameraMatrixBuilder({ matrix, cameras, onChange }: Props) {
+export function CameraMatrixBuilder({ matrix, cameras, editable, onChange }: Props) {
   const rows = matrix.length > 0 ? matrix : [];
 
-  function insertAt(row: number, colAfter: number, camId: string) {
-    if (row === -1) {
-      onChange([...rows, [camId]]);
-    } else {
-      onChange(
-        rows.map((r, ri) => {
-          if (ri !== row) return r;
-          const nr = [...r];
-          nr.splice(colAfter + 1, 0, camId); // colAfter=-1 → prepend
-          return nr;
-        }),
-      );
-    }
+  function appendToRow(row: number, camId: string) {
+    onChange(rows.map((r, ri) => (ri === row ? [...r, camId] : r)));
+  }
+
+  function addRow(camId: string) {
+    onChange([...rows, [camId]]);
   }
 
   function removeAt(row: number, col: number) {
@@ -38,48 +33,68 @@ export function CameraMatrixBuilder({ matrix, cameras, onChange }: Props) {
     );
   }
 
+  // ── пусто ────────────────────────────────────────────────
   if (rows.length === 0) {
+    if (!editable) return <div className="cam-empty-ro">матрица не задана</div>;
     return (
-      <div className="cam-builder">
-        <AddCameraBtn cameras={cameras} onSelect={(id) => insertAt(-1, -1, id)} variant="main" />
-      </div>
+      <CameraPicker cameras={cameras} onSelect={(id) => addRow(id)}>
+        {(open) => (
+          <button className="cam-set-btn" onClick={open}>
+            Задать матрицу камер
+          </button>
+        )}
+      </CameraPicker>
     );
   }
 
+  // ── матрица ──────────────────────────────────────────────
   return (
-    <div className="cam-builder">
-      <div className="cam-matrix">
-        {rows.map((row, ri) => (
-          <div key={ri} className="cam-row">
-            <AddCameraBtn cameras={cameras} onSelect={(id) => insertAt(ri, -1, id)} />
-            {row.map((camId, ci) => (
-              <Fragment key={ci}>
-                <div className="cam-cell">
-                  <span className="cam-cell-id">{camId}</span>
-                  <button className="cam-cell-rm" onClick={() => removeAt(ri, ci)}>
-                    ×
-                  </button>
-                </div>
-                <AddCameraBtn cameras={cameras} onSelect={(id) => insertAt(ri, ci, id)} />
-              </Fragment>
-            ))}
-          </div>
-        ))}
-      </div>
-      <AddCameraBtn cameras={cameras} onSelect={(id) => insertAt(-1, -1, id)} variant="row" />
+    <div className="cam-matrix">
+      {rows.map((row, ri) => (
+        <div key={ri} className="cam-row">
+          {row.map((camId, ci) => (
+            <div key={ci} className="cam-cell">
+              <span className="cam-cell-id">{camId}</span>
+              {editable && (
+                <button className="cam-cell-rm" title="Убрать камеру" onClick={() => removeAt(ri, ci)}>
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+          {editable && (
+            <CameraPicker cameras={cameras} onSelect={(id) => appendToRow(ri, id)}>
+              {(open) => (
+                <button className="cam-add-right" title="Добавить камеру в ряд" onClick={open}>
+                  +
+                </button>
+              )}
+            </CameraPicker>
+          )}
+        </div>
+      ))}
+      {editable && (
+        <CameraPicker cameras={cameras} onSelect={(id) => addRow(id)}>
+          {(open) => (
+            <button className="cam-add-bottom" title="Добавить ряд" onClick={open}>
+              +
+            </button>
+          )}
+        </CameraPicker>
+      )}
     </div>
   );
 }
 
-// ── AddCameraBtn ──────────────────────────────────────────────
+// ── CameraPicker: render-prop обёртка с выпадающим списком ───
 
-interface AddCameraProps {
+interface PickerProps {
   cameras: CamOption[];
   onSelect: (id: string) => void;
-  variant?: 'main' | 'row' | 'inline';
+  children: (open: () => void) => ReactNode;
 }
 
-function AddCameraBtn({ cameras, onSelect, variant = 'inline' }: AddCameraProps) {
+function CameraPicker({ cameras, onSelect, children }: PickerProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
@@ -103,24 +118,9 @@ function AddCameraBtn({ cameras, onSelect, variant = 'inline' }: AddCameraProps)
       c.name.toLowerCase().includes(search.toLowerCase()),
   );
 
-  const wrapCls =
-    `cam-add-wrap` +
-    (variant === 'main' ? ' cam-add-wrap-main' : variant === 'row' ? ' cam-add-wrap-row' : '');
-
-  const btnCls =
-    variant === 'main'
-      ? 'cam-add-main-btn'
-      : variant === 'row'
-        ? 'cam-add-row-btn'
-        : 'cam-add-inline-btn';
-
-  const label = variant === 'main' ? '📷  добавить камеру' : variant === 'row' ? '+ добавить ряд' : '+';
-
   return (
-    <div ref={ref} className={wrapCls}>
-      <button className={btnCls} onClick={() => setOpen((o) => !o)}>
-        {label}
-      </button>
+    <div ref={ref} className="cam-picker-wrap">
+      {children(() => setOpen((o) => !o))}
       {open && (
         <div className="cam-picker">
           <input

@@ -6,6 +6,7 @@ interface ConfigChipProps {
   cameraMatrix: CameraMatrix;
   running: boolean;
   pending: boolean;
+  editable: boolean;
   availableCameras: { id: string; name: string }[];
   onCamerasChange: (matrix: CameraMatrix) => void;
   onRemove: () => void;
@@ -17,37 +18,44 @@ export function ConfigChip({
   cameraMatrix,
   running,
   pending,
+  editable,
   availableCameras,
   onCamerasChange,
   onRemove,
   onDragStart,
 }: ConfigChipProps) {
   const stateClass = pending ? 'pending' : running ? 'running' : 'loaded';
-  const stateLabel = pending ? '⏳ ожидает' : running ? '● работает' : '○ загружен';
+  const stateLabel = pending ? 'ожидает' : running ? 'работает' : 'загружен';
 
   return (
     <div
       className={`chip chip-${stateClass}`}
-      draggable
+      draggable={editable}
       onDragStart={(e) => {
+        if (!editable) return;
         e.dataTransfer.setData('application/x-config', configId);
         e.dataTransfer.effectAllowed = 'move';
         onDragStart();
       }}
     >
       <div className="chip-head">
-        <span className="chip-grip">⠿</span>
         <span className="chip-name">{configId}</span>
-        <span className={`chip-state chip-state-${stateClass}`}>{stateLabel}</span>
-        <button className="btn btn-danger btn-sm" title="Снять с ядра" onClick={onRemove}>
-          ✕
-        </button>
+        <span className={`chip-state chip-state-${stateClass}`}>
+          <span className="state-dot" />
+          {stateLabel}
+        </span>
+        {editable && (
+          <button className="btn btn-danger btn-sm" title="Снять с ядра" onClick={onRemove}>
+            ×
+          </button>
+        )}
       </div>
 
       <div className="chip-section-label">Матрица камер</div>
       <CameraMatrixBuilder
         matrix={cameraMatrix}
         cameras={availableCameras}
+        editable={editable}
         onChange={onCamerasChange}
       />
     </div>
