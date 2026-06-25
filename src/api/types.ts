@@ -67,9 +67,20 @@ export type ImportMode = 'merge' | 'replace';
 export const NPU_CORES = [0, 1, 2] as const;
 export type CoreId = (typeof NPU_CORES)[number];
 
+/** Поток камеры (controller.cpp make_pipeline_json) */
+export interface CameraStreamInfo {
+  width?: number;
+  height?: number;
+  sub_stream?: number;
+  type?: number;
+  name?: string;
+}
+
 /** Камера из GET /camera (controller.cpp) */
 export interface CameraInfo {
   display_name?: string;
   type?: number;
+  camera_type?: number;
   description?: string;
+  streams?: Record<string, CameraStreamInfo>;
 }

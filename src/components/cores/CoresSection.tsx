@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { neuralApi } from '../../api/client';
 import { NPU_CORES } from '../../api/types';
-import type { ActiveDesc, CameraMatrix, ConfigSummary, CoreId, SlotStatus } from '../../api/types';
+import type {
+  ActiveDesc,
+  CameraMatrix,
+  CameraStreamInfo,
+  ConfigSummary,
+  CoreId,
+  SlotStatus,
+} from '../../api/types';
 import { CoreCard } from './CoreCard';
 
 type Assignments = Record<CoreId, string | null>;
@@ -9,6 +16,7 @@ type CameraByConfig = Record<string, CameraMatrix>;
 type Mode = 'view' | 'edit';
 type DropMode = 'move' | 'copy';
 type DragKind = 'core' | 'list' | null;
+export interface CamOption { id: string; name: string; resolution?: string }
 
 const emptyAssignments = (): Assignments => ({ 0: null, 1: null, 2: null });
 
@@ -28,6 +36,17 @@ function camsFromDescs(descs: ActiveDesc[]): CameraByConfig {
   return c;
 }
 
+/** Разрешение основного потока — берём поток с наибольшим разрешением. */
+function mainResolution(streams?: Record<string, CameraStreamInfo>): string | undefined {
+  if (!streams) return undefined;
+  let best: CameraStreamInfo | null = null;
+  for (const s of Object.values(streams)) {
+    if (!s.width || !s.height) continue;
+    if (!best || s.width * s.height > best.width! * best.height!) best = s;
+  }
+  return best ? `${best.width}×${best.height}` : undefined;
+}
+
 export function CoresSection() {
   const [mode, setMode] = useState<Mode>('view');
   const [assignments, setAssignments] = useState<Assignments>(emptyAssignments);
@@ -36,10 +55,12 @@ export function CoresSection() {
   const [savedCameraByConfig, setSavedCameraByConfig] = useState<CameraByConfig>({});
   const [available, setAvailable] = useState<ConfigSummary[]>([]);
   const [status, setStatus] = useState<SlotStatus[]>([]);
-  const [availableCameras, setAvailableCameras] = useState<{ id: string; name: string }[]>([]);
-  const [selectedCore, setSelectedCore] = useState<CoreId | null>(null);
+  const [availableCameras, setAvailableCameras] = useState<CamOption[]>([]);
   const [dragging, setDragging] = useState(false);
   const [dragKind, setDragKind] = useState<DragKind>(null);
+  const [cfgLoading, setCfgLoading] = useState(false);
+  const [cfgCooldown, setCfgCooldown] = useState(false);
+  const [switchModal, setSwitchModal] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -65,8 +86,8 @@ export function CoresSection() {
       const res = await neuralApi.listCameras();
       if (res.cameras) {
         const cams = Object.entries(res.cameras)
-          .filter(([, v]) => v.type === 2)
-          .map(([id, v]) => ({ id, name: v.display_name ?? id }));
+          .filter(([, v]) => (v.type ?? v.camera_type) === 2)
+          .map(([id, v]) => ({ id, name: v.display_name ?? id, resolution: mainResolution(v.streams) }));
         setAvailableCameras(cams);
       }
     } catch {
@@ -93,6 +114,21 @@ export function CoresSection() {
     return () => document.removeEventListener('dragend', end);
   }, []);
 
+  // ── обновление списка конфигураций ─────────────────────────
+  //  Лоадер показывается только пока идёт запрос — результат выводится
+  //  сразу по приходу. Кнопка остаётся заблокированной 2 секунды.
+  async function refreshConfigs() {
+    setCfgCooldown(true);
+    setTimeout(() => setCfgCooldown(false), 2000);
+    setCfgLoading(true);
+    setErr(null);
+    try {
+      await Promise.all([loadState(), loadCameras()]);
+    } finally {
+      setCfgLoading(false);
+    }
+  }
+
   const runningByConfig = useMemo(() => {
     const m: Record<string, boolean> = {};
     for (const s of status) m[s.config_id] = s.running;
@@ -101,7 +137,7 @@ export function CoresSection() {
 
   const isSupervisorRunning = status.some((s) => s.running);
 
-  // какие ядра занимает каждая конфигурация (для флага копии и запроса cores[])
+  // какие ядра занимает каждая конфигурация (флаг копии + cores[] в запросе)
   const coresByConfig = useMemo(() => {
     const m: Record<string, CoreId[]> = {};
     for (const core of NPU_CORES) {
@@ -122,17 +158,25 @@ export function CoresSection() {
     return false;
   }, [assignments, savedAssignments, cameraByConfig, savedCameraByConfig]);
 
+  // ── drag start (отложенно, чтобы не отменить нативный drag) ─
+  const startDrag = useCallback((configId: string, sourceCoreId: CoreId | null, kind: DragKind) => {
+    dragSource.current = { configId, sourceCoreId };
+    setTimeout(() => { setDragging(true); setDragKind(kind); }, 0);
+  }, []);
+
   // ── drop с режимом move/copy ───────────────────────────────
   const dropConfig = useCallback((targetCoreId: CoreId, configId: string, dropMode: DropMode) => {
     const src = dragSource.current;
+    const cfg = configId || src?.configId;
+    if (!cfg) return;
     setAssignments((a) => {
-      const next = { ...a, [targetCoreId]: configId };
+      const next = { ...a, [targetCoreId]: cfg };
       if (dropMode === 'move' && src?.sourceCoreId != null && src.sourceCoreId !== targetCoreId) {
         next[src.sourceCoreId] = null;
       }
       return next;
     });
-    setCameraByConfig((c) => (c[configId] ? c : { ...c, [configId]: [] }));
+    setCameraByConfig((c) => (c[cfg] ? c : { ...c, [cfg]: [] }));
     dragSource.current = null;
     setDragging(false);
     setDragKind(null);
@@ -140,7 +184,6 @@ export function CoresSection() {
 
   const removeFromCore = useCallback((coreId: CoreId) => {
     setAssignments((a) => ({ ...a, [coreId]: null }));
-    setSelectedCore((s) => (s === coreId ? null : s));
   }, []);
 
   const setCameras = useCallback((configId: string, matrix: CameraMatrix) => {
@@ -149,7 +192,6 @@ export function CoresSection() {
 
   const expandToAll = useCallback((configId: string) => {
     setAssignments({ 0: configId, 1: configId, 2: configId });
-    setSelectedCore(null);
   }, []);
 
   // ── сборка дескрипторов и валидация ───────────────────────
@@ -169,21 +211,39 @@ export function CoresSection() {
     return null;
   }
 
-  async function saveState() {
+  async function saveState(): Promise<boolean> {
     const descs = buildDescs();
     const problem = validate(descs);
-    if (problem) { setErr(problem); return; }
+    if (problem) { setErr(problem); return false; }
     setBusy(true); setErr(null);
     try {
       await neuralApi.setState(descs);
       setSavedAssignments({ ...assignments });
       setSavedCameraByConfig({ ...cameraByConfig });
       loadStatus();
+      return true;
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
+      return false;
     } finally {
       setBusy(false);
     }
+  }
+
+  // переход в просмотр: при несохранённых изменениях — спросить
+  function tryGoView() {
+    if (hasPendingChanges) setSwitchModal(true);
+    else setMode('view');
+  }
+
+  async function applyAndView() {
+    if (await saveState()) { setSwitchModal(false); setMode('view'); }
+  }
+
+  function discardAndView() {
+    discardEdits();
+    setSwitchModal(false);
+    setMode('view');
   }
 
   async function control(action: 'start' | 'restart' | 'stop') {
@@ -201,7 +261,6 @@ export function CoresSection() {
   function discardEdits() {
     setAssignments({ ...savedAssignments });
     setCameraByConfig({ ...savedCameraByConfig });
-    setSelectedCore(null);
     setErr(null);
   }
 
@@ -227,16 +286,10 @@ export function CoresSection() {
                 editable={editable}
                 dragging={dragging}
                 dragKind={dragKind}
-                selected={selectedCore === core}
-                onSelect={(c) => setSelectedCore((s) => (s === c ? null : c))}
                 onDropConfig={dropConfig}
                 onCamerasChange={setCameras}
                 onRemove={removeFromCore}
-                onDragStart={(configId, sourceCoreId) => {
-                  dragSource.current = { configId, sourceCoreId };
-                  setDragging(true);
-                  setDragKind('core');
-                }}
+                onDragStart={(configId, sourceCoreId) => startDrag(configId, sourceCoreId, 'core')}
                 onExpandAll={expandToAll}
               />
             );
@@ -249,43 +302,49 @@ export function CoresSection() {
             <span className="section-label" style={{ margin: 0 }}>Конфигурации</span>
             <button
               className="btn-refresh"
-              disabled={busy}
+              disabled={cfgCooldown || busy}
               title="Обновить список"
-              onClick={() => { loadState(); loadCameras(); }}
+              onClick={refreshConfigs}
             >
               обновить
             </button>
           </div>
           <div className="cfg-list">
-            {available.length === 0 && <span className="hint">нет конфигураций</span>}
-            {available.map((c) => {
-              const assignedCores = coresByConfig[c.id] ?? [];
-              return (
-                <div
-                  key={c.id}
-                  className={`cfg-list-item${assignedCores.length > 0 ? ' cfg-list-item-used' : ''}${editable ? ' draggable' : ''}`}
-                  draggable={editable}
-                  onDragStart={(e) => {
-                    if (!editable) return;
-                    e.dataTransfer.setData('application/x-config', c.id);
-                    e.dataTransfer.effectAllowed = 'move';
-                    dragSource.current = { configId: c.id, sourceCoreId: null };
-                    setDragging(true);
-                    setDragKind('list');
-                  }}
-                >
-                  <div className="cfg-list-item-name">{c.name || c.id}</div>
-                  <div className="cfg-list-item-meta">
-                    <span className="cfg-list-item-id">{c.id}</span>
-                    {assignedCores.length > 0 && (
-                      <span className="cfg-list-item-cores">
-                        {assignedCores.map((n) => `C${n}`).join(', ')}
-                      </span>
-                    )}
+            {cfgLoading ? (
+              <div className="cfg-loader">
+                <span className="cfg-spinner" />
+                <span>загрузка конфигураций…</span>
+              </div>
+            ) : available.length === 0 ? (
+              <span className="hint">нет конфигураций</span>
+            ) : (
+              available.map((c) => {
+                const assignedCores = coresByConfig[c.id] ?? [];
+                return (
+                  <div
+                    key={c.id}
+                    className={`cfg-list-item${assignedCores.length > 0 ? ' cfg-list-item-used' : ''}${editable ? ' draggable' : ''}`}
+                    draggable={editable}
+                    onDragStart={(e) => {
+                      if (!editable) return;
+                      e.dataTransfer.setData('application/x-config', c.id);
+                      e.dataTransfer.effectAllowed = 'move';
+                      startDrag(c.id, null, 'list');
+                    }}
+                  >
+                    <div className="cfg-list-item-name">{c.name || c.id}</div>
+                    <div className="cfg-list-item-meta">
+                      <span className="cfg-list-item-id">{c.id}</span>
+                      {assignedCores.length > 0 && (
+                        <span className="cfg-list-item-cores">
+                          {assignedCores.map((n) => `C${n}`).join(', ')}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
       </div>
@@ -298,7 +357,7 @@ export function CoresSection() {
           <div className="mode-toggle">
             <button
               className={`mode-toggle-btn${mode === 'view' ? ' active' : ''}`}
-              onClick={() => { setMode('view'); setSelectedCore(null); }}
+              onClick={tryGoView}
             >
               Просмотр
             </button>
@@ -345,6 +404,30 @@ export function CoresSection() {
           )}
         </div>
       </div>
+
+      {/* ── Модалка: несохранённые изменения при переходе в просмотр ── */}
+      {switchModal && (
+        <div className="modal-overlay" onClick={() => setSwitchModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title">Несохранённые изменения</div>
+            <div className="modal-body">
+              Есть изменения, которые не были применены. Сохраните их или сбросьте,
+              прежде чем перейти в режим просмотра.
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" disabled={busy} onClick={() => setSwitchModal(false)}>
+                Отмена
+              </button>
+              <button className="btn btn-danger" disabled={busy} onClick={discardAndView}>
+                Сбросить
+              </button>
+              <button className="btn btn-primary" disabled={busy} onClick={applyAndView}>
+                Применить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

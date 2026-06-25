@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { DragEvent } from 'react';
 import type { CameraMatrix, CoreId } from '../../api/types';
+import type { CamOption } from './CoresSection';
 import { ConfigChip } from './ConfigChip';
 
 type DropMode = 'move' | 'copy';
@@ -11,14 +12,12 @@ interface CoreCardProps {
   configId: string | null;
   savedConfigId: string | null;
   cameraMatrix: CameraMatrix;
-  availableCameras: { id: string; name: string }[];
+  availableCameras: CamOption[];
   occupiedCores: CoreId[];
   running: boolean;
   editable: boolean;
   dragging: boolean;
   dragKind: DragKind;
-  selected: boolean;
-  onSelect: (coreId: CoreId) => void;
   onDropConfig: (coreId: CoreId, configId: string, mode: DropMode) => void;
   onCamerasChange: (configId: string, matrix: CameraMatrix) => void;
   onRemove: (coreId: CoreId) => void;
@@ -37,8 +36,6 @@ export function CoreCard({
   editable,
   dragging,
   dragKind,
-  selected,
-  onSelect,
   onDropConfig,
   onCamerasChange,
   onRemove,
@@ -54,7 +51,6 @@ export function CoreCard({
   if (pending) cardCls += ' core-card-pending';
   else if (occupied && running) cardCls += ' core-card-active';
   else if (occupied) cardCls += ' core-card-loaded';
-  if (selected) cardCls += ' core-card-selected';
 
   const stateText = pending
     ? occupied
@@ -73,7 +69,7 @@ export function CoreCard({
     e.stopPropagation();
     setOverZone(null);
     const dropped = e.dataTransfer.getData('application/x-config');
-    if (dropped) onDropConfig(coreId, dropped, mode);
+    onDropConfig(coreId, dropped, mode);
   }
 
   function zoneProps(mode: DropMode) {
@@ -89,17 +85,12 @@ export function CoreCard({
   }
 
   const showDropZones = editable && dragging;
-  // из списка конфигураций — только перемещение; из ядра — move/copy
   const moveOnly = dragKind === 'list';
 
   return (
     <div className="core-row-wrap">
       <div className={cardCls}>
-        <div
-          className="core-head"
-          onClick={() => editable && occupied && onSelect(coreId)}
-          style={{ cursor: editable && occupied ? 'pointer' : 'default' }}
-        >
+        <div className="core-head">
           <span className="core-id">CORE {coreId}</span>
           <span className={`core-state ${stateColorCls}`}>
             <span className="state-dot" />
@@ -108,21 +99,34 @@ export function CoreCard({
         </div>
 
         {occupied ? (
-          <ConfigChip
-            configId={configId}
-            cameraMatrix={cameraMatrix}
-            pending={pending}
-            editable={editable}
-            occupiedCores={occupiedCores}
-            availableCameras={availableCameras}
-            onCamerasChange={(m) => onCamerasChange(configId, m)}
-            onRemove={() => onRemove(coreId)}
-            onDragStart={() => onDragStart(configId, coreId)}
-          />
-        ) : (
+          <>
+            <ConfigChip
+              configId={configId}
+              cameraMatrix={cameraMatrix}
+              pending={pending}
+              editable={editable}
+              occupiedCores={occupiedCores}
+              availableCameras={availableCameras}
+              onCamerasChange={(m) => onCamerasChange(configId, m)}
+              onRemove={() => onRemove(coreId)}
+              onDragStart={() => onDragStart(configId, coreId)}
+            />
+            {editable && occupiedCores.length < 3 && (
+              <button
+                className="core-expand-all"
+                onClick={() => onExpandAll(configId)}
+                title="Назначить эту конфигурацию на все ядра"
+              >
+                Ко всем ядрам
+              </button>
+            )}
+          </>
+        ) : editable ? (
           <div className="core-empty">
             {pending ? 'будет очищено при применении' : 'перетащите конфигурацию сюда'}
           </div>
+        ) : (
+          <div className="core-empty-text">отсутствует конфигурация для данного ядра</div>
         )}
 
         {/* Зоны перемещения / копирования — поверх карточки во время перетаскивания */}
@@ -144,19 +148,6 @@ export function CoreCard({
             </div>
           ))}
       </div>
-
-      {/* Выезжающая панель: применить ко всем ядрам */}
-      {occupied && (
-        <div className={`core-slideout${selected ? ' open' : ''}`}>
-          <button
-            className="btn btn-accent btn-sm"
-            onClick={() => onExpandAll(configId)}
-            title="Назначить эту конфигурацию на все ядра"
-          >
-            Применить ко всем ядрам
-          </button>
-        </div>
-      )}
     </div>
   );
 }

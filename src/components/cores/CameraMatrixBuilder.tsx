@@ -1,11 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { CameraMatrix } from '../../api/types';
-
-interface CamOption {
-  id: string;
-  name: string;
-}
+import type { CamOption } from './CoresSection';
 
 interface Props {
   matrix: CameraMatrix;
@@ -17,7 +13,9 @@ interface Props {
 export function CameraMatrixBuilder({ matrix, cameras, editable, onChange }: Props) {
   const rows = matrix.length > 0 ? matrix : [];
 
-  const nameOf = (id: string) => cameras.find((c) => c.id === id)?.name ?? id;
+  const camOf = (id: string) => cameras.find((c) => c.id === id);
+  const nameOf = (id: string) => camOf(id)?.name ?? id;
+  const resOf = (id: string) => camOf(id)?.resolution;
 
   function appendToRow(row: number, camId: string) {
     onChange(rows.map((r, ri) => (ri === row ? [...r, camId] : r)));
@@ -57,6 +55,7 @@ export function CameraMatrixBuilder({ matrix, cameras, editable, onChange }: Pro
           {row.map((camId, ci) => (
             <div key={ci} className="cam-cell" title={camId}>
               <span className="cam-cell-id">{nameOf(camId)}</span>
+              {resOf(camId) && <span className="cam-cell-res">{resOf(camId)}</span>}
               {editable && (
                 <button className="cam-cell-rm" title="Убрать камеру" onClick={() => removeAt(ri, ci)}>
                   ×
@@ -146,6 +145,7 @@ function CameraPicker({ cameras, onSelect, wrapClass, children }: PickerProps) {
                 }}
               >
                 <span className="cam-picker-cid">{c.name}</span>
+                {c.resolution && <span className="cam-picker-cres">{c.resolution}</span>}
                 {c.name !== c.id && <span className="cam-picker-cname">{c.id}</span>}
               </button>
             ))}

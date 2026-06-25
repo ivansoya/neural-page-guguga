@@ -195,21 +195,22 @@ body {
 
 /* ── Cores layout ──────────────────────────────────────────── */
 /* Секция занимает доступную высоту, чтобы футер прижимался к низу */
-.cores-section { display: flex; flex-direction: column; min-height: calc(100vh - var(--nav-h) - 48px); }
-.cores-layout { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; align-items: start; }
+/* Фиксированная высота секции — внутренний скролл вместо роста страницы */
+.cores-section { display: flex; flex-direction: column; height: calc(100vh - var(--nav-h) - 48px); }
+/* Раскладка занимает всё место до футера, колонки тянутся на всю высоту */
+.cores-layout { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 2fr 1fr; gap: 16px; align-items: stretch; }
 
 /* Левая колонка — прокручиваемый список ядер без видимого ползунка */
 .cores-col {
-    display: flex; flex-direction: column; gap: 14px;
-    max-height: calc(100vh - 230px); overflow-y: auto; padding-right: 2px;
+    display: flex; flex-direction: column; gap: 14px; min-width: 0; min-height: 0;
+    overflow-y: auto; overflow-x: hidden; padding-right: 2px;
     scrollbar-width: none;
 }
 .cores-col::-webkit-scrollbar { display: none; }
 
 /* Правая колонка — полупрозрачный тёмный фон-панель */
 .configs-col {
-    display: flex; flex-direction: column; gap: 10px; position: sticky; top: 0;
-    max-height: calc(100vh - 230px);
+    display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0;
     background: rgba(8,10,15,0.55); border: 1px solid var(--border);
     border-radius: var(--radius-lg); padding: 12px;
 }
@@ -235,7 +236,6 @@ body {
 .core-card-active   { border-color: var(--ok); box-shadow: 0 0 0 1px rgba(64,255,144,0.15); }
 .core-card-loaded   { border-color: var(--accent-dim); }
 .core-card-pending  { border-color: var(--warn); animation: pending-pulse 2s ease-in-out infinite; }
-.core-card-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
 @keyframes pending-pulse {
     0%,100% { box-shadow: 0 0 0 1px rgba(255,204,64,0.15); }
     50%      { box-shadow: 0 0 0 2px rgba(255,204,64,0.4); }
@@ -254,6 +254,11 @@ body {
     color: var(--text-dim); font-family: var(--font-mono); font-size: 10px;
     letter-spacing: 0.08em; padding: 20px; text-align: center;
 }
+.core-empty-text {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    color: var(--text-secondary); font-family: var(--font-mono); font-size: 14px;
+    letter-spacing: 0.04em; padding: 24px 16px; text-align: center;
+}
 
 /* Зоны перемещения / копирования (overlay во время перетаскивания) */
 .core-dropzones { position: absolute; inset: 0; display: flex; border-radius: var(--radius-lg); overflow: hidden; z-index: 10; }
@@ -264,16 +269,14 @@ body {
 .core-dz-move.over { background: rgba(74,168,255,0.30); }
 .core-dz-copy.over { background: rgba(64,255,144,0.26); }
 
-/* Выезжающая панель «применить ко всем ядрам» */
-.core-slideout {
-    position: absolute; top: 0; right: 0; height: 100%; z-index: 20;
-    display: flex; align-items: center; padding: 0 14px;
-    background: var(--bg-panel-2); border: 1px solid var(--accent-dim); border-left: none;
-    border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
-    transform: translateX(calc(100% - 10px)); opacity: 0; pointer-events: none;
-    transition: transform 0.25s ease, opacity 0.2s ease;
+/* Маленькая кнопка «Ко всем ядрам» под блоком конфигурации */
+.core-expand-all {
+    align-self: flex-start; background: transparent; border: 1px solid var(--border-bright);
+    border-radius: var(--radius); color: var(--text-secondary);
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em;
+    padding: 5px 10px; cursor: pointer; transition: all 0.15s;
 }
-.core-slideout.open { transform: translateX(100%); opacity: 1; pointer-events: auto; }
+.core-expand-all:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
 
 /* ── Config chip ───────────────────────────────────────────── */
 .chip { background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 10px; }
@@ -312,7 +315,8 @@ body {
     background: var(--bg-base); border: 1px solid var(--border-bright); border-radius: var(--radius);
     padding: 8px 12px;
 }
-.cam-cell-id { flex: 1; font-family: var(--font-mono); font-size: 13px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cam-cell-id { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 13px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cam-cell-res { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
 .cam-cell-rm { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; flex-shrink: 0; transition: color 0.15s; }
 .cam-cell-rm:hover { color: var(--err); }
 
@@ -339,8 +343,11 @@ body {
 .cam-picker {
     position: absolute; top: calc(100% + 4px); left: 0; z-index: 300;
     background: var(--bg-panel); border: 1px solid var(--border-bright);
-    border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,0.5); min-width: 210px;
+    border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    min-width: 210px; max-width: 280px;
 }
+/* Кнопка «+» в ряду — правая: дропдаун открываем влево, чтобы не вылезал за край */
+.cam-pick-right .cam-picker { left: auto; right: 0; }
 .cam-picker-search {
     width: 100%; background: transparent; border: none; border-bottom: 1px solid var(--border);
     padding: 8px 10px; color: var(--text-primary); font-family: var(--font-mono); font-size: 12px; outline: none;
@@ -352,13 +359,27 @@ body {
     background: none; border: none; cursor: pointer; text-align: left; width: 100%; transition: background 0.1s;
 }
 .cam-picker-item:hover { background: var(--bg-input); }
-.cam-picker-cid   { font-family: var(--font-mono); font-size: 12px; color: var(--text-primary); }
+.cam-picker-cid   { font-family: var(--font-mono); font-size: 12px; color: var(--text-primary); flex: 1; }
+.cam-picker-cres  { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
 .cam-picker-cname { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
 .cam-picker-empty { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); text-align: center; padding: 14px; }
 
 /* ── Config list (правая колонка) ──────────────────────────── */
-.cfg-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; scrollbar-width: none; }
+.cfg-list { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; scrollbar-width: none; }
 .cfg-list::-webkit-scrollbar { display: none; }
+
+/* Лоадер при обновлении списка конфигураций */
+.cfg-loader {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+    padding: 32px 12px; color: var(--text-dim);
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em;
+}
+.cfg-spinner {
+    width: 22px; height: 22px; border-radius: 50%;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    animation: cfg-spin 0.8s linear infinite;
+}
+@keyframes cfg-spin { to { transform: rotate(360deg); } }
 .cfg-list-item {
     background: rgba(12,15,22,0.7); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 8px 10px; user-select: none; cursor: default; transition: border-color 0.15s;
@@ -377,7 +398,7 @@ body {
 .cores-footer {
     position: sticky; bottom: 0; z-index: 50;
     background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px;
-    margin-top: auto; padding: 10px 12px;
+    margin-top: 14px; padding: 10px 12px;
     display: flex; align-items: center; gap: 12px;
 }
 .cores-footer-status  { display: flex; align-items: center; gap: 12px; flex: 1; }
@@ -392,6 +413,21 @@ body {
 }
 .mode-toggle-btn:hover:not(.active) { color: var(--text-secondary); }
 .mode-toggle-btn.active { background: var(--accent-glow); color: var(--accent); }
+
+/* ── Modal ─────────────────────────────────────────────────── */
+.modal-overlay {
+    position: fixed; inset: 0; z-index: 1000;
+    background: rgba(4,6,10,0.6); backdrop-filter: blur(2px);
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.modal {
+    width: 100%; max-width: 420px;
+    background: var(--bg-panel); border: 1px solid var(--border-bright); border-radius: var(--radius-lg);
+    box-shadow: 0 16px 48px rgba(0,0,0,0.6); padding: 18px; display: flex; flex-direction: column; gap: 12px;
+}
+.modal-title { font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--warn); }
+.modal-body  { font-family: var(--font-ui); font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 
 .supervisor-badge {
     display: flex; align-items: center; gap: 5px;

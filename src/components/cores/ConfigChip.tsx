@@ -1,4 +1,5 @@
 import type { CameraMatrix, CoreId } from '../../api/types';
+import type { CamOption } from './CoresSection';
 import { CameraMatrixBuilder } from './CameraMatrixBuilder';
 
 interface ConfigChipProps {
@@ -7,7 +8,7 @@ interface ConfigChipProps {
   pending: boolean;
   editable: boolean;
   occupiedCores: CoreId[];
-  availableCameras: { id: string; name: string }[];
+  availableCameras: CamOption[];
   onCamerasChange: (matrix: CameraMatrix) => void;
   onRemove: () => void;
   onDragStart: () => void;
