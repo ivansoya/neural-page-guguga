@@ -8,6 +8,7 @@ type Assignments = Record<CoreId, string | null>;
 type CameraByConfig = Record<string, CameraMatrix>;
 type Mode = 'view' | 'edit';
 type DropMode = 'move' | 'copy';
+type DragKind = 'core' | 'list' | null;
 
 const emptyAssignments = (): Assignments => ({ 0: null, 1: null, 2: null });
 
@@ -38,6 +39,7 @@ export function CoresSection() {
   const [availableCameras, setAvailableCameras] = useState<{ id: string; name: string }[]>([]);
   const [selectedCore, setSelectedCore] = useState<CoreId | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [dragKind, setDragKind] = useState<DragKind>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -86,7 +88,7 @@ export function CoresSection() {
 
   // глобальный конец перетаскивания
   useEffect(() => {
-    const end = () => setDragging(false);
+    const end = () => { setDragging(false); setDragKind(null); };
     document.addEventListener('dragend', end);
     return () => document.removeEventListener('dragend', end);
   }, []);
@@ -99,9 +101,19 @@ export function CoresSection() {
 
   const isSupervisorRunning = status.some((s) => s.running);
 
+  // какие ядра занимает каждая конфигурация (для флага копии и запроса cores[])
+  const coresByConfig = useMemo(() => {
+    const m: Record<string, CoreId[]> = {};
+    for (const core of NPU_CORES) {
+      const cfg = assignments[core];
+      if (!cfg) continue;
+      (m[cfg] ??= []).push(core);
+    }
+    return m;
+  }, [assignments]);
+
   const hasPendingChanges = useMemo(() => {
     if (NPU_CORES.some((c) => assignments[c] !== savedAssignments[c])) return true;
-    // изменения в матрицах камер активных конфигов
     const activeCfgs = new Set(NPU_CORES.map((c) => assignments[c]).filter(Boolean) as string[]);
     for (const cfg of activeCfgs) {
       if (JSON.stringify(cameraByConfig[cfg] ?? []) !== JSON.stringify(savedCameraByConfig[cfg] ?? []))
@@ -123,6 +135,7 @@ export function CoresSection() {
     setCameraByConfig((c) => (c[configId] ? c : { ...c, [configId]: [] }));
     dragSource.current = null;
     setDragging(false);
+    setDragKind(null);
   }, []);
 
   const removeFromCore = useCallback((coreId: CoreId) => {
@@ -141,15 +154,7 @@ export function CoresSection() {
 
   // ── сборка дескрипторов и валидация ───────────────────────
   function buildDescs(): ActiveDesc[] {
-    const byConfig = new Map<string, CoreId[]>();
-    for (const core of NPU_CORES) {
-      const cfg = assignments[core];
-      if (!cfg) continue;
-      const list = byConfig.get(cfg) ?? [];
-      list.push(core);
-      byConfig.set(cfg, list);
-    }
-    return [...byConfig.entries()].map(([config_id, cores]) => {
+    return Object.entries(coresByConfig).map(([config_id, cores]) => {
       const matrix = (cameraByConfig[config_id] ?? [])
         .map((row) => row.map((s) => s.trim()).filter(Boolean))
         .filter((row) => row.length > 0);
@@ -203,33 +208,39 @@ export function CoresSection() {
   const editable = mode === 'edit';
 
   return (
-    <>
+    <div className="cores-section">
       <div className="cores-layout">
         {/* ── Левая колонка: прокручиваемый список ядер ─────── */}
         <div className="cores-col">
-          {NPU_CORES.map((core) => (
-            <CoreCard
-              key={core}
-              coreId={core}
-              configId={assignments[core]}
-              savedConfigId={savedAssignments[core]}
-              cameraMatrix={assignments[core] ? (cameraByConfig[assignments[core]!] ?? []) : []}
-              availableCameras={availableCameras}
-              running={assignments[core] ? !!runningByConfig[assignments[core]!] : false}
-              editable={editable}
-              dragging={dragging}
-              selected={selectedCore === core}
-              onSelect={(c) => setSelectedCore((s) => (s === c ? null : c))}
-              onDropConfig={dropConfig}
-              onCamerasChange={setCameras}
-              onRemove={removeFromCore}
-              onDragStart={(configId, sourceCoreId) => {
-                dragSource.current = { configId, sourceCoreId };
-                setDragging(true);
-              }}
-              onExpandAll={expandToAll}
-            />
-          ))}
+          {NPU_CORES.map((core) => {
+            const cfg = assignments[core];
+            return (
+              <CoreCard
+                key={core}
+                coreId={core}
+                configId={cfg}
+                savedConfigId={savedAssignments[core]}
+                cameraMatrix={cfg ? (cameraByConfig[cfg] ?? []) : []}
+                availableCameras={availableCameras}
+                occupiedCores={cfg ? (coresByConfig[cfg] ?? []) : []}
+                running={cfg ? !!runningByConfig[cfg] : false}
+                editable={editable}
+                dragging={dragging}
+                dragKind={dragKind}
+                selected={selectedCore === core}
+                onSelect={(c) => setSelectedCore((s) => (s === c ? null : c))}
+                onDropConfig={dropConfig}
+                onCamerasChange={setCameras}
+                onRemove={removeFromCore}
+                onDragStart={(configId, sourceCoreId) => {
+                  dragSource.current = { configId, sourceCoreId };
+                  setDragging(true);
+                  setDragKind('core');
+                }}
+                onExpandAll={expandToAll}
+              />
+            );
+          })}
         </div>
 
         {/* ── Правая колонка: список конфигураций ──────────── */}
@@ -248,7 +259,7 @@ export function CoresSection() {
           <div className="cfg-list">
             {available.length === 0 && <span className="hint">нет конфигураций</span>}
             {available.map((c) => {
-              const assignedCores = NPU_CORES.filter((k) => assignments[k] === c.id);
+              const assignedCores = coresByConfig[c.id] ?? [];
               return (
                 <div
                   key={c.id}
@@ -260,6 +271,7 @@ export function CoresSection() {
                     e.dataTransfer.effectAllowed = 'move';
                     dragSource.current = { configId: c.id, sourceCoreId: null };
                     setDragging(true);
+                    setDragKind('list');
                   }}
                 >
                   <div className="cfg-list-item-name">{c.name || c.id}</div>
@@ -283,15 +295,6 @@ export function CoresSection() {
       {/* ── Подвал ──────────────────────────────────────────── */}
       <div className="cores-footer">
         <div className="cores-footer-status">
-          <span className={`supervisor-badge ${isSupervisorRunning ? 'supervisor-running' : 'supervisor-stopped'}`}>
-            <span className="supervisor-dot" />
-            {isSupervisorRunning ? 'SUPERVISOR RUNNING' : 'SUPERVISOR STOPPED'}
-          </span>
-          {editable && hasPendingChanges && <span className="pending-badge">изменения не применены</span>}
-        </div>
-
-        <div className="cores-footer-actions">
-          {/* Переключатель режима */}
           <div className="mode-toggle">
             <button
               className={`mode-toggle-btn${mode === 'view' ? ' active' : ''}`}
@@ -307,20 +310,20 @@ export function CoresSection() {
             </button>
           </div>
 
+          <span className={`supervisor-badge ${isSupervisorRunning ? 'supervisor-running' : 'supervisor-stopped'}`}>
+            <span className="supervisor-dot" />
+            {isSupervisorRunning ? 'SUPERVISOR RUNNING' : 'SUPERVISOR STOPPED'}
+          </span>
+          {editable && hasPendingChanges && <span className="pending-badge">изменения не применены</span>}
+        </div>
+
+        <div className="cores-footer-actions">
           {editable && (
             <>
-              <button
-                className="btn btn-ghost"
-                disabled={busy || !hasPendingChanges}
-                onClick={discardEdits}
-              >
+              <button className="btn btn-ghost" disabled={busy || !hasPendingChanges} onClick={discardEdits}>
                 Сбросить
               </button>
-              <button
-                className="btn btn-primary"
-                disabled={busy || !hasPendingChanges}
-                onClick={saveState}
-              >
+              <button className="btn btn-primary" disabled={busy || !hasPendingChanges} onClick={saveState}>
                 Применить
               </button>
             </>
@@ -342,6 +345,6 @@ export function CoresSection() {
           )}
         </div>
       </div>
-    </>
+    </div>
   );
 }

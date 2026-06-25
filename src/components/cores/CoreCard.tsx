@@ -4,6 +4,7 @@ import type { CameraMatrix, CoreId } from '../../api/types';
 import { ConfigChip } from './ConfigChip';
 
 type DropMode = 'move' | 'copy';
+type DragKind = 'core' | 'list' | null;
 
 interface CoreCardProps {
   coreId: CoreId;
@@ -11,9 +12,11 @@ interface CoreCardProps {
   savedConfigId: string | null;
   cameraMatrix: CameraMatrix;
   availableCameras: { id: string; name: string }[];
+  occupiedCores: CoreId[];
   running: boolean;
   editable: boolean;
   dragging: boolean;
+  dragKind: DragKind;
   selected: boolean;
   onSelect: (coreId: CoreId) => void;
   onDropConfig: (coreId: CoreId, configId: string, mode: DropMode) => void;
@@ -29,9 +32,11 @@ export function CoreCard({
   savedConfigId,
   cameraMatrix,
   availableCameras,
+  occupiedCores,
   running,
   editable,
   dragging,
+  dragKind,
   selected,
   onSelect,
   onDropConfig,
@@ -84,6 +89,8 @@ export function CoreCard({
   }
 
   const showDropZones = editable && dragging;
+  // из списка конфигураций — только перемещение; из ядра — move/copy
+  const moveOnly = dragKind === 'list';
 
   return (
     <div className="core-row-wrap">
@@ -104,9 +111,9 @@ export function CoreCard({
           <ConfigChip
             configId={configId}
             cameraMatrix={cameraMatrix}
-            running={running}
             pending={pending}
             editable={editable}
+            occupiedCores={occupiedCores}
             availableCameras={availableCameras}
             onCamerasChange={(m) => onCamerasChange(configId, m)}
             onRemove={() => onRemove(coreId)}
@@ -119,16 +126,23 @@ export function CoreCard({
         )}
 
         {/* Зоны перемещения / копирования — поверх карточки во время перетаскивания */}
-        {showDropZones && (
-          <div className="core-dropzones">
-            <div className={`core-dz core-dz-move${overZone === 'move' ? ' over' : ''}`} {...zoneProps('move')}>
-              <span>Переместить</span>
+        {showDropZones &&
+          (moveOnly ? (
+            <div className="core-dropzones">
+              <div className={`core-dz core-dz-move full${overZone === 'move' ? ' over' : ''}`} {...zoneProps('move')}>
+                <span>Переместить</span>
+              </div>
             </div>
-            <div className={`core-dz core-dz-copy${overZone === 'copy' ? ' over' : ''}`} {...zoneProps('copy')}>
-              <span>Копировать</span>
+          ) : (
+            <div className="core-dropzones">
+              <div className={`core-dz core-dz-move${overZone === 'move' ? ' over' : ''}`} {...zoneProps('move')}>
+                <span>Переместить</span>
+              </div>
+              <div className={`core-dz core-dz-copy${overZone === 'copy' ? ' over' : ''}`} {...zoneProps('copy')}>
+                <span>Копировать</span>
+              </div>
             </div>
-          </div>
-        )}
+          ))}
       </div>
 
       {/* Выезжающая панель: применить ко всем ядрам */}
