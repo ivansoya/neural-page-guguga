@@ -171,7 +171,7 @@ body {
 .class-tag:hover { border-color: var(--border-bright); }
 .class-swatch { width: 24px; height: 24px; border-radius: 8px; flex-shrink: 0; }
 .class-name { font-size: 13px; color: var(--text-primary); }
-.super-chip { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 20px; border: 1px solid transparent; letter-spacing: 0.04em; white-space: nowrap; }
+.super-chip { font-size: 10px; font-weight: 700; padding: 2px 5px; border-radius: 20px; border: 1px solid transparent; letter-spacing: 0.04em; white-space: nowrap; }
 
 /* ── Row editor (режим редактирования классов/суперклассов) ── */
 .edit-toolbar { display: flex; align-items: center; gap: 8px; }
