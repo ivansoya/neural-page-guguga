@@ -9,6 +9,7 @@ interface ConfigChipProps {
   editable: boolean;
   occupiedCores: CoreId[];
   availableCameras: CamOption[];
+  excludedCameras: Set<string>;
   onCamerasChange: (matrix: CameraMatrix) => void;
   onRemove: () => void;
   onDragStart: () => void;
@@ -21,6 +22,7 @@ export function ConfigChip({
   editable,
   occupiedCores,
   availableCameras,
+  excludedCameras,
   onCamerasChange,
   onRemove,
   onDragStart,
@@ -57,6 +59,7 @@ export function ConfigChip({
       <CameraMatrixBuilder
         matrix={cameraMatrix}
         cameras={availableCameras}
+        excluded={excludedCameras}
         editable={editable}
         onChange={onCamerasChange}
       />

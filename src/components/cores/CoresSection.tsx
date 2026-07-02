@@ -11,29 +11,37 @@ import type {
 } from '../../api/types';
 import { CoreCard } from './CoreCard';
 
-type Assignments = Record<CoreId, string | null>;
-type CameraByConfig = Record<string, CameraMatrix>;
 type Mode = 'view' | 'edit';
 type DropMode = 'move' | 'copy';
 type DragKind = 'core' | 'list' | null;
 export interface CamOption { id: string; name: string; resolution?: string }
 
-const emptyAssignments = (): Assignments => ({ 0: null, 1: null, 2: null });
-
-function assignmentsFromDescs(descs: ActiveDesc[]): Assignments {
-  const a = emptyAssignments();
-  for (const d of descs) {
-    for (const core of d.cores) {
-      if ((NPU_CORES as readonly number[]).includes(core)) a[core as CoreId] = d.config_id;
-    }
-  }
-  return a;
+/**
+ * Слот = один конфиг + одна матрица камер, работающий на наборе NPU-ядер.
+ * Несколько ядер в одном слоте — это параллелизм одного слота (cores:[0,1]).
+ * Один и тот же config_id в разных слотах с разными камерами — разные слоты.
+ */
+interface Slot {
+  configId: string;
+  cameras: CameraMatrix;
+  cores: CoreId[];
 }
 
-function camsFromDescs(descs: ActiveDesc[]): CameraByConfig {
-  const c: CameraByConfig = {};
-  for (const d of descs) c[d.config_id] = d.camera_matrix;
-  return c;
+const isCore = (c: number): c is CoreId => (NPU_CORES as readonly number[]).includes(c);
+const clone = (s: Slot[]): Slot[] => s.map((x) => ({ ...x, cameras: x.cameras.map((r) => [...r]), cores: [...x.cores] }));
+const slotKey = (configId: string, cameras: CameraMatrix) => configId + '|' + JSON.stringify(cameras);
+
+function slotsFromDescs(descs: ActiveDesc[]): Slot[] {
+  return descs
+    .map((d) => ({ configId: d.config_id, cameras: d.camera_matrix ?? [], cores: (d.cores ?? []).filter(isCore) }))
+    .filter((s) => s.cores.length > 0);
+}
+
+/** core → подпись слота (config + камеры), для подсветки изменений. */
+function coreSig(slots: Slot[]): Record<CoreId, string | null> {
+  const m: Record<CoreId, string | null> = { 0: null, 1: null, 2: null };
+  for (const s of slots) for (const c of s.cores) m[c] = slotKey(s.configId, s.cameras);
+  return m;
 }
 
 /** Разрешение основного потока — берём поток с наибольшим разрешением. */
@@ -49,10 +57,8 @@ function mainResolution(streams?: Record<string, CameraStreamInfo>): string | un
 
 export function CoresSection() {
   const [mode, setMode] = useState<Mode>('view');
-  const [assignments, setAssignments] = useState<Assignments>(emptyAssignments);
-  const [savedAssignments, setSavedAssignments] = useState<Assignments>(emptyAssignments);
-  const [cameraByConfig, setCameraByConfig] = useState<CameraByConfig>({});
-  const [savedCameraByConfig, setSavedCameraByConfig] = useState<CameraByConfig>({});
+  const [slots, setSlots] = useState<Slot[]>([]);
+  const [savedSlots, setSavedSlots] = useState<Slot[]>([]);
   const [available, setAvailable] = useState<ConfigSummary[]>([]);
   const [status, setStatus] = useState<SlotStatus[]>([]);
   const [availableCameras, setAvailableCameras] = useState<CamOption[]>([]);
@@ -72,12 +78,9 @@ export function CoresSection() {
       neuralApi.getState(),
       neuralApi.listConfigurations().then((r) => r.configurations).catch(() => [] as ConfigSummary[]),
     ]);
-    const a = assignmentsFromDescs(descs);
-    const cams = camsFromDescs(descs);
-    setAssignments(a);
-    setSavedAssignments(a);
-    setCameraByConfig(cams);
-    setSavedCameraByConfig(cams);
+    const s = slotsFromDescs(descs);
+    setSlots(clone(s));
+    setSavedSlots(clone(s));
     setAvailable(cfgs);
   }, []);
 
@@ -115,8 +118,6 @@ export function CoresSection() {
   }, []);
 
   // ── обновление списка конфигураций ─────────────────────────
-  //  Лоадер показывается только пока идёт запрос — результат выводится
-  //  сразу по приходу. Кнопка остаётся заблокированной 2 секунды.
   async function refreshConfigs() {
     setCfgCooldown(true);
     setTimeout(() => setCfgCooldown(false), 2000);
@@ -129,79 +130,125 @@ export function CoresSection() {
     }
   }
 
-  const runningByConfig = useMemo(() => {
-    const m: Record<string, boolean> = {};
-    for (const s of status) m[s.config_id] = s.running;
+  // ── производные ────────────────────────────────────────────
+  const slotByCore = useMemo(() => {
+    const m: Record<CoreId, Slot | undefined> = { 0: undefined, 1: undefined, 2: undefined };
+    for (const s of slots) for (const c of s.cores) m[c] = s;
     return m;
-  }, [status]);
+  }, [slots]);
 
+  // running по ключу слота (config + камеры)
+  const runningKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of status) if (s.running) set.add(slotKey(s.config_id, s.camera_matrix ?? []));
+    return set;
+  }, [status]);
   const isSupervisorRunning = status.some((s) => s.running);
 
-  // какие ядра занимает каждая конфигурация (флаг копии + cores[] в запросе)
-  const coresByConfig = useMemo(() => {
+  // ядра, занятые каждым config_id (для индикатора в списке)
+  const coresByConfigId = useMemo(() => {
     const m: Record<string, CoreId[]> = {};
-    for (const core of NPU_CORES) {
-      const cfg = assignments[core];
-      if (!cfg) continue;
-      (m[cfg] ??= []).push(core);
-    }
+    for (const s of slots) (m[s.configId] ??= []).push(...s.cores);
+    for (const k of Object.keys(m)) m[k].sort();
     return m;
-  }, [assignments]);
+  }, [slots]);
 
-  const hasPendingChanges = useMemo(() => {
-    if (NPU_CORES.some((c) => assignments[c] !== savedAssignments[c])) return true;
-    const activeCfgs = new Set(NPU_CORES.map((c) => assignments[c]).filter(Boolean) as string[]);
-    for (const cfg of activeCfgs) {
-      if (JSON.stringify(cameraByConfig[cfg] ?? []) !== JSON.stringify(savedCameraByConfig[cfg] ?? []))
-        return true;
-    }
-    return false;
-  }, [assignments, savedAssignments, cameraByConfig, savedCameraByConfig]);
+  const curSig = useMemo(() => coreSig(slots), [slots]);
+  const savedSig = useMemo(() => coreSig(savedSlots), [savedSlots]);
+  const hasPendingChanges = NPU_CORES.some((c) => curSig[c] !== savedSig[c]);
 
-  // ── drag start (отложенно, чтобы не отменить нативный drag) ─
+  // ── операции над слотами ───────────────────────────────────
+  const removeCore = (list: Slot[], core: CoreId): Slot[] =>
+    list
+      .map((s) => (s.cores.includes(core) ? { ...s, cores: s.cores.filter((c) => c !== core) } : s))
+      .filter((s) => s.cores.length > 0);
+
   const startDrag = useCallback((configId: string, sourceCoreId: CoreId | null, kind: DragKind) => {
     dragSource.current = { configId, sourceCoreId };
     setTimeout(() => { setDragging(true); setDragKind(kind); }, 0);
   }, []);
 
-  // ── drop с режимом move/copy ───────────────────────────────
-  const dropConfig = useCallback((targetCoreId: CoreId, configId: string, dropMode: DropMode) => {
+  const finishDrag = () => { dragSource.current = null; setDragging(false); setDragKind(null); };
+
+  const dropConfig = useCallback((targetCore: CoreId, configId: string, dropMode: DropMode) => {
     const src = dragSource.current;
-    const cfg = configId || src?.configId;
-    if (!cfg) return;
-    setAssignments((a) => {
-      const next = { ...a, [targetCoreId]: cfg };
-      if (dropMode === 'move' && src?.sourceCoreId != null && src.sourceCoreId !== targetCoreId) {
-        next[src.sourceCoreId] = null;
+    const srcCore = src?.sourceCoreId ?? null;
+
+    setSlots((list) => {
+      // источник — ядро
+      if (srcCore != null) {
+        if (srcCore === targetCore) return list; // на себя
+        const srcSlot = list.find((s) => s.cores.includes(srcCore));
+        if (!srcSlot) return list;
+        if (dropMode === 'copy' && srcSlot.cores.includes(targetCore)) return list;
+
+        let next = removeCore(list, targetCore);
+        if (dropMode === 'copy') {
+          // подключаем целевое ядро к слоту источника (параллелизм)
+          next = next.map((s) =>
+            s.cores.includes(srcCore) ? { ...s, cores: [...s.cores, targetCore].sort() } : s,
+          );
+        } else {
+          // перемещаем размещение источника на целевое ядро
+          next = next.map((s) =>
+            s.cores.includes(srcCore)
+              ? { ...s, cores: s.cores.map((c) => (c === srcCore ? targetCore : c)).sort() }
+              : s,
+          );
+        }
+        return next;
       }
+
+      // источник — список конфигураций (только move): новый слот без камер
+      const cfg = configId || src?.configId;
+      if (!cfg) return list;
+      const next = removeCore(list, targetCore);
+      next.push({ configId: cfg, cameras: [], cores: [targetCore] });
       return next;
     });
-    setCameraByConfig((c) => (c[cfg] ? c : { ...c, [cfg]: [] }));
-    dragSource.current = null;
-    setDragging(false);
-    setDragKind(null);
+
+    finishDrag();
   }, []);
 
-  const removeFromCore = useCallback((coreId: CoreId) => {
-    setAssignments((a) => ({ ...a, [coreId]: null }));
+  const removeFromCore = useCallback((core: CoreId) => {
+    setSlots((list) => removeCore(list, core));
   }, []);
 
-  const setCameras = useCallback((configId: string, matrix: CameraMatrix) => {
-    setCameraByConfig((c) => ({ ...c, [configId]: matrix }));
+  const setCameras = useCallback((core: CoreId, matrix: CameraMatrix) => {
+    setSlots((list) => list.map((s) => (s.cores.includes(core) ? { ...s, cameras: matrix } : s)));
   }, []);
 
-  const expandToAll = useCallback((configId: string) => {
-    setAssignments({ 0: configId, 1: configId, 2: configId });
-  }, []);
-
-  // ── сборка дескрипторов и валидация ───────────────────────
-  function buildDescs(): ActiveDesc[] {
-    return Object.entries(coresByConfig).map(([config_id, cores]) => {
-      const matrix = (cameraByConfig[config_id] ?? [])
-        .map((row) => row.map((s) => s.trim()).filter(Boolean))
-        .filter((row) => row.length > 0);
-      return { config_id, cores, camera_matrix: matrix };
+  // задействовать все ядра для слота этого ядра
+  const expandToAll = useCallback((core: CoreId) => {
+    setSlots((list) => {
+      const slot = list.find((s) => s.cores.includes(core));
+      if (!slot) return list;
+      return [{ configId: slot.configId, cameras: slot.cameras, cores: [0, 1, 2] }];
     });
+  }, []);
+
+  // камеры, занятые в других слотах (для уникальности)
+  const excludedFor = useCallback(
+    (core: CoreId): Set<string> => {
+      const set = new Set<string>();
+      for (const s of slots) {
+        if (s.cores.includes(core)) continue;
+        for (const row of s.cameras) for (const cam of row) set.add(cam);
+      }
+      return set;
+    },
+    [slots],
+  );
+
+  // ── сохранение ─────────────────────────────────────────────
+  function buildDescs(): ActiveDesc[] {
+    return slots.map((s) => ({
+      config_id: s.configId,
+      cores: [...s.cores],
+      camera_matrix: s.cameras
+        .map((row) => row.map((x) => x.trim()).filter(Boolean))
+        .filter((row) => row.length > 0),
+    }));
   }
 
   function validate(descs: ActiveDesc[]): string | null {
@@ -218,8 +265,7 @@ export function CoresSection() {
     setBusy(true); setErr(null);
     try {
       await neuralApi.setState(descs);
-      setSavedAssignments({ ...assignments });
-      setSavedCameraByConfig({ ...cameraByConfig });
+      setSavedSlots(clone(slots));
       loadStatus();
       return true;
     } catch (e) {
@@ -230,16 +276,17 @@ export function CoresSection() {
     }
   }
 
-  // переход в просмотр: при несохранённых изменениях — спросить
   function tryGoView() {
     if (hasPendingChanges) setSwitchModal(true);
     else setMode('view');
   }
-
   async function applyAndView() {
     if (await saveState()) { setSwitchModal(false); setMode('view'); }
   }
-
+  function discardEdits() {
+    setSlots(clone(savedSlots));
+    setErr(null);
+  }
   function discardAndView() {
     discardEdits();
     setSwitchModal(false);
@@ -258,12 +305,6 @@ export function CoresSection() {
     }
   }
 
-  function discardEdits() {
-    setAssignments({ ...savedAssignments });
-    setCameraByConfig({ ...savedCameraByConfig });
-    setErr(null);
-  }
-
   const editable = mode === 'edit';
 
   return (
@@ -272,17 +313,19 @@ export function CoresSection() {
         {/* ── Левая колонка: прокручиваемый список ядер ─────── */}
         <div className="cores-col">
           {NPU_CORES.map((core) => {
-            const cfg = assignments[core];
+            const slot = slotByCore[core];
+            const running = slot ? runningKeys.has(slotKey(slot.configId, slot.cameras)) : false;
             return (
               <CoreCard
                 key={core}
                 coreId={core}
-                configId={cfg}
-                savedConfigId={savedAssignments[core]}
-                cameraMatrix={cfg ? (cameraByConfig[cfg] ?? []) : []}
+                configId={slot?.configId ?? null}
+                pending={curSig[core] !== savedSig[core]}
+                cameraMatrix={slot?.cameras ?? []}
                 availableCameras={availableCameras}
-                occupiedCores={cfg ? (coresByConfig[cfg] ?? []) : []}
-                running={cfg ? !!runningByConfig[cfg] : false}
+                excludedCameras={excludedFor(core)}
+                occupiedCores={slot?.cores ?? []}
+                running={running}
                 editable={editable}
                 dragging={dragging}
                 dragKind={dragKind}
@@ -319,7 +362,7 @@ export function CoresSection() {
               <span className="hint">нет конфигураций</span>
             ) : (
               available.map((c) => {
-                const assignedCores = coresByConfig[c.id] ?? [];
+                const assignedCores = coresByConfigId[c.id] ?? [];
                 return (
                   <div
                     key={c.id}

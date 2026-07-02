@@ -6,16 +6,25 @@ import type { CamOption } from './CoresSection';
 interface Props {
   matrix: CameraMatrix;
   cameras: CamOption[];
+  /** Камеры, занятые в других слотах — недоступны для выбора. */
+  excluded?: Set<string>;
   editable: boolean;
   onChange: (m: CameraMatrix) => void;
 }
 
-export function CameraMatrixBuilder({ matrix, cameras, editable, onChange }: Props) {
+export function CameraMatrixBuilder({ matrix, cameras, excluded, editable, onChange }: Props) {
   const rows = matrix.length > 0 ? matrix : [];
 
   const camOf = (id: string) => cameras.find((c) => c.id === id);
   const nameOf = (id: string) => camOf(id)?.name ?? id;
   const resOf = (id: string) => camOf(id)?.resolution;
+
+  // камеры, уже использованные в этой матрице
+  const usedHere = new Set<string>();
+  for (const r of rows) for (const c of r) usedHere.add(c);
+
+  // доступные для добавления: не заняты тут и не заняты в других слотах
+  const selectable = cameras.filter((c) => !usedHere.has(c.id) && !excluded?.has(c.id));
 
   function appendToRow(row: number, camId: string) {
     onChange(rows.map((r, ri) => (ri === row ? [...r, camId] : r)));
@@ -37,7 +46,7 @@ export function CameraMatrixBuilder({ matrix, cameras, editable, onChange }: Pro
   if (rows.length === 0) {
     if (!editable) return <div className="cam-empty-ro">матрица не задана</div>;
     return (
-      <CameraPicker cameras={cameras} onSelect={(id) => addRow(id)} wrapClass="cam-pick-full">
+      <CameraPicker cameras={selectable} onSelect={(id) => addRow(id)} wrapClass="cam-pick-full">
         {(open) => (
           <button className="cam-set-btn" onClick={open}>
             Задать матрицу камер
@@ -64,7 +73,7 @@ export function CameraMatrixBuilder({ matrix, cameras, editable, onChange }: Pro
             </div>
           ))}
           {editable && (
-            <CameraPicker cameras={cameras} onSelect={(id) => appendToRow(ri, id)} wrapClass="cam-pick-right">
+            <CameraPicker cameras={selectable} onSelect={(id) => appendToRow(ri, id)} wrapClass="cam-pick-right">
               {(open) => (
                 <button className="cam-add-right" title="Добавить камеру в ряд" onClick={open}>
                   +
@@ -75,7 +84,7 @@ export function CameraMatrixBuilder({ matrix, cameras, editable, onChange }: Pro
         </div>
       ))}
       {editable && (
-        <CameraPicker cameras={cameras} onSelect={(id) => addRow(id)} wrapClass="cam-pick-full">
+        <CameraPicker cameras={selectable} onSelect={(id) => addRow(id)} wrapClass="cam-pick-full">
           {(open) => (
             <button className="cam-add-bottom" title="Добавить ряд" onClick={open}>
               +

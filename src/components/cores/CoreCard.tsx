@@ -10,27 +10,29 @@ type DragKind = 'core' | 'list' | null;
 interface CoreCardProps {
   coreId: CoreId;
   configId: string | null;
-  savedConfigId: string | null;
+  pending: boolean;
   cameraMatrix: CameraMatrix;
   availableCameras: CamOption[];
+  excludedCameras: Set<string>;
   occupiedCores: CoreId[];
   running: boolean;
   editable: boolean;
   dragging: boolean;
   dragKind: DragKind;
   onDropConfig: (coreId: CoreId, configId: string, mode: DropMode) => void;
-  onCamerasChange: (configId: string, matrix: CameraMatrix) => void;
+  onCamerasChange: (coreId: CoreId, matrix: CameraMatrix) => void;
   onRemove: (coreId: CoreId) => void;
   onDragStart: (configId: string, sourceCoreId: CoreId) => void;
-  onExpandAll: (configId: string) => void;
+  onExpandAll: (coreId: CoreId) => void;
 }
 
 export function CoreCard({
   coreId,
   configId,
-  savedConfigId,
+  pending,
   cameraMatrix,
   availableCameras,
+  excludedCameras,
   occupiedCores,
   running,
   editable,
@@ -45,7 +47,6 @@ export function CoreCard({
   const [overZone, setOverZone] = useState<DropMode | null>(null);
 
   const occupied = configId !== null;
-  const pending = configId !== savedConfigId;
 
   let cardCls = 'core-card';
   if (pending) cardCls += ' core-card-pending';
@@ -107,15 +108,16 @@ export function CoreCard({
               editable={editable}
               occupiedCores={occupiedCores}
               availableCameras={availableCameras}
-              onCamerasChange={(m) => onCamerasChange(configId, m)}
+              excludedCameras={excludedCameras}
+              onCamerasChange={(m) => onCamerasChange(coreId, m)}
               onRemove={() => onRemove(coreId)}
               onDragStart={() => onDragStart(configId, coreId)}
             />
             {editable && occupiedCores.length < 3 && (
               <button
                 className="core-expand-all"
-                onClick={() => onExpandAll(configId)}
-                title="Назначить эту конфигурацию на все ядра"
+                onClick={() => onExpandAll(coreId)}
+                title="Задействовать все ядра для этого слота"
               >
                 Ко всем ядрам
               </button>
